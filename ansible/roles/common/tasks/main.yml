@@ -1,0 +1,25 @@
+---
+# Baseline role applied to every host under management: updates, agent, sane defaults.
+# Extend per-service roles alongside this one rather than piling everything in here.
+
+- name: Update apt cache
+  apt:
+    update_cache: true
+    cache_valid_time: 3600
+  when: ansible_os_family == "Debian"
+
+- name: Upgrade all packages
+  apt:
+    upgrade: dist
+  when: ansible_os_family == "Debian"
+
+- name: Ensure qemu-guest-agent is installed (VMs only, harmless on LXC)
+  apt:
+    name: qemu-guest-agent
+    state: present
+  when: ansible_os_family == "Debian"
+  ignore_errors: true
+
+- name: Set timezone
+  timezone:
+    name: America/Chicago
