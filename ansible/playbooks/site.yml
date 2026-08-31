@@ -1,0 +1,6 @@
+---
+- name: Baseline configuration for all managed hosts
+  hosts: all
+  become: true
+  roles:
+    - common

@@ -1,0 +1,7 @@
+# Copy this file to terraform.tfvars and fill in real values.
+# terraform.tfvars is gitignored — never commit it.
+
+proxmox_api_url          = "https://192.168.1.10:8006/api2/json"
+proxmox_api_token_id     = "terraform@pve!tf"
+proxmox_api_token_secret = "REPLACE_ME"
+target_node              = "host1"
