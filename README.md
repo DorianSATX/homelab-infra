@@ -36,3 +36,23 @@ ansible-playbook -i inventory/hosts.yml playbooks/site.yml --check   # dry run
 Nothing that looks like a credential belongs in this repo. `terraform.tfvars`, `*.tfstate`, and any
 Ansible Vault files are gitignored. Generate a Proxmox API token scoped to what Terraform needs
 (Datacenter → Permissions → API Tokens) rather than using the root password.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    subgraph Repo[homelab-infra]
+        TF[terraform/proxmox]
+        ANS[ansible/]
+        K3S[k3s/manifests]
+    end
+
+    TF -- "provisions LXC/VM shells" --> PVE[(Proxmox HA cluster)]
+    ANS -- "configures OS + installs services" --> PVE
+    K3S -. "future: workloads move here" .-> PVE
+```
+
+Terraform creates the container or VM shell on the cluster; Ansible then configures what runs
+inside it (packages, users, service config). k3s is the eventual home for services currently
+running as standalone LXCs/Docker containers, migrated over one at a time rather than all at once.
+See [ROADMAP.md](ROADMAP.md) for where this is headed.
