@@ -5,9 +5,17 @@ Current state vs. where this is headed. Updated as things actually get done, not
 ## Cluster
 
 - [x] Single Proxmox node (`host1`, 192.168.1.10) managing ~30 LXCs/VMs
-- [ ] Expand to 3-node HA cluster — two more nodes planned, not yet racked/joined
+- [x] Expand to 3-node HA cluster — `homelab` cluster live as of Sept 2026: host1, pve2
+      (repurposed 3D-printing mini PC, 192.168.1.12), pve3 (192.168.1.13). Quorate,
+      tolerates one node loss. See docs/cluster.md for full setup + troubleshooting.
 - [ ] Once HA is live: `target_node` in terraform/proxmox becomes a per-resource choice
       (or a round-robin `for_each`) instead of a single default
+- [ ] No shared/replicated storage yet — host1 is LVM-thin, pve2/pve3 are ZFS root but with
+      no registered `local-zfs` storage entry post-join (see docs/cluster.md). Add a dedicated
+      second drive per node, then Proxmox storage replication, before HA failover is real
+- [ ] Once storage replication exists: enable CRS Dynamic mode + auto-rebalance
+      (Datacenter > Options > Cluster Resource Scheduling) so host1 can offload
+      HA-managed guests to pve2/pve3 automatically under CPU/memory pressure
 
 ## Backup
 
