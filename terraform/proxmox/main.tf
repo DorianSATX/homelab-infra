@@ -15,6 +15,9 @@ provider "proxmox" {
 
 # --- Example resource: a fresh LXC to cut your teeth on Terraform+Ansible before touching k3s ---
 # Uncomment and adjust once your API token is in place, then `terraform plan`.
+# node_name below is pinned to var.target_node (host1). Once a resource actually needs to land
+# on pve2/pve3, switch to var.proxmox_nodes (see variables.tf) for per-resource or round-robin
+# placement instead of adding more single-node defaults.
 
 # resource "proxmox_virtual_environment_container" "example" {
 #   node_name = var.target_node

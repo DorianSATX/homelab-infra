@@ -87,6 +87,10 @@ Caveats: only affects **HA-managed** guests (not just any VM/CT), and it's drive
 crs: ha=dynamic,ha-auto-rebalance=1,ha-auto-rebalance-threshold=35,ha-auto-rebalance-margin=15,ha-auto-rebalance-hold-duration=5
 ```
 
+## IaC coverage
+
+pve2 and pve3 are now in `ansible/inventory/hosts.yml` under the `proxmox_host` group (same baseline `common` role as host1 — apt upgrade, qemu-guest-agent, timezone). Terraform's `proxmox/variables.tf` gained a `proxmox_nodes` list variable (`["host1", "pve2", "pve3"]`) for future per-resource/round-robin node placement — `target_node` is still a single default pointed at `host1` until an actual resource needs to land on pve2 or pve3.
+
 ## Troubleshooting cheat sheet
 
 - **Is the cluster healthy?** `pvecm status` on any node — check `Quorate: Yes` and that all expected nodes are listed under Membership.
@@ -105,4 +109,3 @@ crs: ha=dynamic,ha-auto-rebalance=1,ha-auto-rebalance-threshold=35,ha-auto-rebal
 ## Still outstanding
 
 - Re-add `local-zfs` storage entries for pve2/pve3 (see Storage section above).
-- Add pve2/pve3 to the `homelab-infra` Terraform/Ansible inventory (github.com/DorianSATX/homelab-infra) alongside host1.
