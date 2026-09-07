@@ -59,10 +59,28 @@ metadata:
   name: uptime-kuma
   namespace: monitoring
 spec:
-  type: NodePort
+  type: ClusterIP
   selector:
     app: uptime-kuma
   ports:
     - port: 3001
       targetPort: 3001
-      nodePort: 30001
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: uptime-kuma
+  namespace: monitoring
+spec:
+  ingressClassName: traefik
+  rules:
+  - host: uptimekuma.dv-lan.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: uptime-kuma
+            port:
+              number: 3001
