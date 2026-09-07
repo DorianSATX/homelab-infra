@@ -8,8 +8,11 @@ Current state vs. where this is headed. Updated as things actually get done, not
 - [x] Expand to 3-node HA cluster — `homelab` cluster live as of Sept 2026: host1, pve2
       (repurposed 3D-printing mini PC, 192.168.1.12), pve3 (192.168.1.13). Quorate,
       tolerates one node loss. See docs/cluster.md for full setup + troubleshooting.
-- [ ] Once HA is live: `target_node` in terraform/proxmox becomes a per-resource choice
-      (or a round-robin `for_each`) instead of a single default
+- [x] pve2/pve3 added to the Ansible inventory (`proxmox_host` group) and a `proxmox_nodes`
+      list variable added in terraform/proxmox, alongside host1
+- [ ] `target_node` in terraform/proxmox is still a single default (`host1`); no resource has
+      moved to per-resource/round-robin placement over `proxmox_nodes` yet since nothing has
+      been created against pve2/pve3 through Terraform so far
 - [ ] No shared/replicated storage yet — host1 is LVM-thin, pve2/pve3 are ZFS root but with
       no registered `local-zfs` storage entry post-join (see docs/cluster.md). Add a dedicated
       second drive per node, then Proxmox storage replication, before HA failover is real

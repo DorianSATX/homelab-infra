@@ -21,3 +21,9 @@ variable "target_node" {
   type        = string
   default     = "host1"
 }
+
+variable "proxmox_nodes" {
+  description = "All nodes in the homelab cluster, for future per-resource/round-robin placement (e.g. element(var.proxmox_nodes, count.index % length(var.proxmox_nodes)))"
+  type        = list(string)
+  default     = ["host1", "pve2", "pve3"]
+}

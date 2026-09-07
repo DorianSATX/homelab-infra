@@ -5,3 +5,4 @@ proxmox_api_url          = "https://192.168.1.10:8006/api2/json"
 proxmox_api_token_id     = "terraform@pve!tf"
 proxmox_api_token_secret = "REPLACE_ME"
 target_node              = "host1"
+# proxmox_nodes           = ["host1", "pve2", "pve3"]  # override only if node names differ
