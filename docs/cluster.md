@@ -100,9 +100,9 @@ crs: ha=dynamic,ha-auto-rebalance=1,ha-auto-rebalance-threshold=35,ha-auto-rebal
 ## Cleanup already done
 
 - CT116 (unused OctoPrint LXC) deleted from host1, Sept 2026.
+- Removed the dead `DV-Desktop2025-Videos` DFS symlink on CT126 (`dfs-namespace`), Sept 2026 — it pointed at `msdfs:192.168.50.112\Videos`, the mini PC's old Windows share, wiped when the mini PC became `pve2`. Data behind it was not preserved elsewhere and is considered gone (confirmed before deletion). The two legitimate DFS links (`DV-2016-E-2TB`, `DV-2016-D-1TB`) are untouched.
 
 ## Still outstanding
 
-- Repoint or remove the `DV-Desktop2025-Videos` DFS symlink on CT126 (`dfs-namespace`) — it currently points at the mini PC's old Windows install, which no longer exists (that mini PC is now `pve2`).
 - Re-add `local-zfs` storage entries for pve2/pve3 (see Storage section above).
 - Add pve2/pve3 to the `homelab-infra` Terraform/Ansible inventory (github.com/DorianSATX/homelab-infra) alongside host1.
