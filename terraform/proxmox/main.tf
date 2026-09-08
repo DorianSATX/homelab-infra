@@ -39,7 +39,7 @@ provider "proxmox" {
 #   }
 #
 #   disk {
-#     datastore_id = "local-lvm"
+#     datastore_id = "local-zfs"
 #     size         = 8
 #   }
 #
@@ -99,6 +99,99 @@ resource "proxmox_virtual_environment_vm" "k3s1" {
   }
 
   initialization {
+    ip_config {
+      ipv4 {
+        address = "192.0.2.1/24"
+        gateway = "192.0.2.1"
+      }
+    }
+
+    user_account {
+      keys = [file(pathexpand("~/.ssh/id_ed25519.pub"))]
+    }
+  }
+}
+resource "proxmox_virtual_environment_vm" "k3s2" {
+  name      = "k3s2"
+  node_name = "pve2"
+  vm_id     = 202
+
+  clone {
+    vm_id = 9001
+    full  = true
+  }
+
+  agent {
+    enabled = true
+  }
+
+  cpu {
+    cores = 2
+  }
+
+  memory {
+    dedicated = 4096
+  }
+
+  disk {
+    datastore_id = "local-zfs"
+    interface    = "scsi0"
+    size         = 20
+  }
+
+  network_device {
+    bridge = "vmbr0"
+  }
+
+  initialization {
+    datastore_id = "local-zfs"
+    ip_config {
+      ipv4 {
+        address = "192.0.2.1/24"
+        gateway = "192.0.2.1"
+      }
+    }
+
+    user_account {
+      keys = [file(pathexpand("~/.ssh/id_ed25519.pub"))]
+    }
+  }
+}
+
+resource "proxmox_virtual_environment_vm" "k3s3" {
+  name      = "k3s3"
+  node_name = "pve3"
+  vm_id     = 203
+
+  clone {
+    vm_id = 9002
+    full  = true
+  }
+
+  agent {
+    enabled = true
+  }
+
+  cpu {
+    cores = 2
+  }
+
+  memory {
+    dedicated = 4096
+  }
+
+  disk {
+    datastore_id = "local-zfs"
+    interface    = "scsi0"
+    size         = 20
+  }
+
+  network_device {
+    bridge = "vmbr0"
+  }
+
+  initialization {
+    datastore_id = "local-zfs"
     ip_config {
       ipv4 {
         address = "192.0.2.1/24"
