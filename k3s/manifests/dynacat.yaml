@@ -1,0 +1,181 @@
+# Dynacat dashboard - k3s manifest
+# Deploy: kubectl apply -f dynacat.yaml
+# No PVC needed (unlike uptime-kuma.yaml) - Dynacat is stateless, all
+# "state" is this ConfigMap holding dynacat.yml.
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dashboard
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dynacat-config
+  namespace: dashboard
+data:
+  dynacat.yml: |
+    server:
+      host: 0.0.0.0
+      port: 8080
+
+    pages:
+      - name: Home
+        columns:
+          - size: full
+            widgets:
+              - type: bookmarks
+                groups:
+                  - title: Infrastructure
+                    links:
+                      - title: Proxmox host1
+                        url: https://192.168.1.10:8006
+                      - title: Proxmox pve2
+                        url: https://192.168.1.12:8006
+                      - title: Proxmox pve3
+                        url: https://192.168.1.13:8006
+                      - title: Proxmox Backup Server
+                        url: https://192.168.1.110:8007
+                      # TODO: fill in your actual NPM hostname if you've proxied Netbox
+                      - title: Netbox
+                        url: https://netbox.dv-lan.com
+
+                  - title: Monitoring
+                    links:
+                      - title: Uptime Kuma
+                        url: https://uptimekuma.dv-lan.com
+                      # TODO: replace with your actual Grafana/Zabbix hostnames
+                      - title: Grafana
+                        url: https://grafana.dv-lan.com
+                      - title: Zabbix
+                        url: https://zabbix.dv-lan.com
+
+                  - title: Services
+                    links:
+                      # TODO: replace with your actual hostnames for these
+                      - title: Vaultwarden
+                        url: https://vaultwarden.dv-lan.com
+                      - title: AdGuard Home
+                        url: https://adguard.dv-lan.com
+                      - title: n8n
+                        url: https://n8n.dv-lan.com
+
+              # NOTE: the "docker-containers" widget needs a Docker socket.
+              # k3s nodes run containerd, not dockerd, so there's no
+              # docker.sock to mount here - that's why it's skipped. If you
+              # stand up a dedicated Docker host later, point this widget at
+              # that host's docker.sock or a TCP endpoint.
+
+              - type: monitor
+                title: Service Status
+                sites:
+                  - title: Uptime Kuma
+                    url: https://uptimekuma.dv-lan.com
+                  - title: AdGuard Home
+                    url: https://adguard.dv-lan.com
+                  - title: Vaultwarden
+                    url: https://vaultwarden.dv-lan.com
+                  - title: k3s API (kube-vip control-plane VIP)
+                    url: https://192.168.1.72:6443
+
+          - size: small
+            widgets:
+              - type: clock
+                hour-format: 24h
+                timezones:
+                  - timezone: America/Chicago
+                    label: Home
+
+              - type: rss
+                style: vertical-list
+                limit: 10
+                collapse-after: 5
+                feeds:
+                  - url: https://kubernetes.io/feed.xml
+                    title: Kubernetes Blog
+                  - url: https://news.ycombinator.com/rss
+                    title: Hacker News
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dynacat
+  namespace: dashboard
+  labels:
+    app: dynacat
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: dynacat
+  template:
+    metadata:
+      labels:
+        app: dynacat
+    spec:
+      # Spread the 2 replicas across different nodes where possible, so a
+      # single node going down doesn't take the dashboard with it.
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: dynacat
+                topologyKey: kubernetes.io/hostname
+      containers:
+        - name: dynacat
+          image: ghcr.io/panonim/dynacat:latest
+          ports:
+            - containerPort: 8080
+          volumeMounts:
+            - name: config
+              mountPath: /app/config
+              readOnly: true
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+      volumes:
+        - name: config
+          configMap:
+            name: dynacat-config
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dynacat
+  namespace: dashboard
+spec:
+  selector:
+    app: dynacat
+  ports:
+    - port: 80
+      targetPort: 8080
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: dynacat
+  namespace: dashboard
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: dynacat.dv-lan.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: dynacat
+                port:
+                  number: 80
