@@ -24,6 +24,9 @@ Current state vs. where this is headed. Updated as things actually get done, not
 
 - [ ] Proxmox Backup Server — currently manual/UI-driven; bring backup job schedules under
       Terraform or Ansible once the PBS Terraform provider or API approach is settled
+- [x] `pbs1`'s `klipper-laptop` datastore now receives real backups — `proxmox-backup-client`
+      installed on the Klipper laptop, scoped token (`klipper-backup@pbs!klipper-laptop-token`),
+      weekly cron (Sundays 3am). See docs/prind/README.md.
 
 ## Observability
 
@@ -41,6 +44,11 @@ Current state vs. where this is headed. Updated as things actually get done, not
 
 - [ ] Move 2-3 simple standalone services (changedetection, uptimekuma, smokeping) into k3s
       as the first real test of the k3s/manifests/ folder
+- [ ] Klipper laptop (192.168.50.122, standalone Debian box, not in the Proxmox cluster) runs
+      a Docker Compose stack ("prind") that's already container-native — a candidate for k3s,
+      but klipper needs privileged host + `/dev` access for the printer's USB/serial connection,
+      so it needs a real node-affinity/device-plugin design rather than a blind lift-and-shift.
+      See docs/prind/README.md.
 
 ## Cloud
 
