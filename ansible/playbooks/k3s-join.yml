@@ -1,0 +1,41 @@
+---
+- name: Fetch k3s join token from the first server
+  hosts: k3s_first_server
+  become: true
+  tasks:
+    - name: Read node-token file
+      slurp:
+        src: /var/lib/rancher/k3s/server/node-token
+      register: k3s_token_raw
+
+    - name: Store decoded token as a fact for other plays to use
+      set_fact:
+        k3s_join_token: "{{ k3s_token_raw.content | b64decode | trim }}"
+
+- name: Join additional servers to the k3s cluster
+  hosts: k3s_additional_servers
+  become: true
+  vars:
+    k3s_server_url: "https://192.168.1.21:6443"
+    k3s_join_token: "{{ hostvars['k3s1']['k3s_join_token'] }}"
+  tasks:
+    - name: Install k3s and join as an additional server
+      shell: "curl -sfL https://get.k3s.io | sh -s - server --server {{ k3s_server_url }}"
+      args:
+        creates: /usr/local/bin/k3s
+      environment:
+        K3S_TOKEN: "{{ k3s_join_token }}"
+      no_log: true
+
+- name: Verify cluster membership
+  hosts: k3s_first_server
+  become: true
+  tasks:
+    - name: Get node list
+      command: k3s kubectl get nodes -o wide
+      register: node_list
+      changed_when: false
+
+    - name: Show cluster nodes
+      debug:
+        var: node_list.stdout_lines
