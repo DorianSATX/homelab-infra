@@ -60,6 +60,8 @@ data:
                         url: https://adguard.dv-lan.com
                       - title: n8n
                         url: https://n8n.dv-lan.com
+                      - title: Stash
+                        url: https://stash.dv-lan.com
 
               # NOTE: the "docker-containers" widget needs a Docker socket.
               # k3s nodes run containerd, not dockerd, so there's no
