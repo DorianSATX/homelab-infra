@@ -1,0 +1,47 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: { name: scrutiny-data, namespace: monitoring }
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources: { requests: { storage: 5Gi } }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: scrutiny, namespace: monitoring }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: scrutiny } }
+  template:
+    metadata: { labels: { app: scrutiny } }
+    spec:
+      containers:
+        - name: scrutiny
+          image: ghcr.io/analogj/scrutiny:master-omnibus   # pin once working
+          ports: [{ containerPort: 8080 }]
+          volumeMounts:
+            - { name: data, mountPath: /opt/scrutiny/config, subPath: config }
+            - { name: data, mountPath: /opt/scrutiny/influxdb, subPath: influxdb }
+            - { name: cfg, mountPath: /opt/scrutiny/config/scrutiny.yaml, subPath: scrutiny.yaml }
+      volumes:
+        - { name: data, persistentVolumeClaim: { claimName: scrutiny-data } }
+        - { name: cfg, secret: { secretName: scrutiny-config } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: scrutiny, namespace: monitoring }
+spec:
+  selector: { app: scrutiny }
+  ports: [{ port: 8080, targetPort: 8080 }]
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata: { name: scrutiny, namespace: monitoring }
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: scrutiny.example.lan
+      http:
+        paths:
+          - { path: /, pathType: Prefix, backend: { service: { name: scrutiny, port: { number: 8080 } } } }
