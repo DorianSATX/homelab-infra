@@ -1,0 +1,42 @@
+- hosts: proxmox_host
+  vars:
+    scrutiny_version: v0.10.0
+  tasks:
+    - name: Install dir
+      ansible.builtin.file:
+        path: /opt/scrutiny/bin
+        state: directory
+        mode: "0755"
+
+    - name: Collector binary
+      ansible.builtin.get_url:
+        url: "https://github.com/AnalogJ/scrutiny/releases/download/{{ scrutiny_version }}/scrutiny-collector-metrics-linux-amd64"
+        dest: /opt/scrutiny/bin/scrutiny-collector-metrics
+        mode: "0755"
+
+    - name: Service unit (one run)
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/scrutiny-collector.service
+        content: |
+          [Unit]
+          Description=Scrutiny SMART collector
+          [Service]
+          Type=oneshot
+          ExecStart=/opt/scrutiny/bin/scrutiny-collector-metrics run --api-endpoint https://scrutiny.example.lan --host-id {{ inventory_hostname }}
+
+    - name: Timer (every 15 min)
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/scrutiny-collector.timer
+        content: |
+          [Timer]
+          OnBootSec=2min
+          OnUnitActiveSec=15min
+          [Install]
+          WantedBy=timers.target
+
+    - name: Enable timer
+      ansible.builtin.systemd:
+        name: scrutiny-collector.timer
+        enabled: true
+        state: started
+        daemon_reload: true

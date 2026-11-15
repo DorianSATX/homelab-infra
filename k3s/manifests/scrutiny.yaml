@@ -18,7 +18,7 @@ spec:
     spec:
       containers:
         - name: scrutiny
-          image: ghcr.io/analogj/scrutiny:master-omnibus   # pin once working
+          image: ghcr.io/analogj/scrutiny:v0.10.0-omnibus   # pin once working
           ports: [{ containerPort: 8080 }]
           volumeMounts:
             - { name: data, mountPath: /opt/scrutiny/config, subPath: config }
