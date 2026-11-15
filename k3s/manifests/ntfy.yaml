@@ -1,0 +1,60 @@
+apiVersion: v1
+kind: ConfigMap
+metadata: { name: ntfy-config, namespace: monitoring }
+data:
+  server.yml: |
+    base-url: "https://ntfy.example.lan"
+    listen-http: ":80"
+    behind-proxy: true
+    cache-file: "/var/lib/ntfy/cache.db"
+    cache-duration: "336h"
+    auth-file: "/var/lib/ntfy/user.db"
+    auth-default-access: "deny-all"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: { name: ntfy-data, namespace: monitoring }
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources: { requests: { storage: 1Gi } }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: ntfy, namespace: monitoring }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: ntfy } }
+  template:
+    metadata: { labels: { app: ntfy } }
+    spec:
+      containers:
+        - name: ntfy
+          image: binwiederhier/ntfy:latest   # pin a version tag once it works
+          args: ["serve"]
+          ports: [{ containerPort: 80 }]
+          volumeMounts:
+            - { name: config, mountPath: /etc/ntfy }
+            - { name: data, mountPath: /var/lib/ntfy }
+      volumes:
+        - { name: config, configMap: { name: ntfy-config } }
+        - { name: data, persistentVolumeClaim: { claimName: ntfy-data } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: ntfy, namespace: monitoring }
+spec:
+  selector: { app: ntfy }
+  ports: [{ port: 80, targetPort: 80 }]
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata: { name: ntfy, namespace: monitoring }
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: ntfy.example.lan
+      http:
+        paths:
+          - { path: /, pathType: Prefix, backend: { service: { name: ntfy, port: { number: 80 } } } }
