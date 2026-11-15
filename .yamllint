@@ -1,0 +1,21 @@
+---
+# Relaxed defaults for k8s manifests and Ansible. Style issues warn, real errors fail.
+extends: default
+
+rules:
+  line-length:
+    max: 160
+    level: warning
+  braces:
+    max-spaces-inside: 1      # allow { a: b } flow style used in manifests
+  brackets:
+    max-spaces-inside: 1
+  document-start: disable     # '---' at top is optional
+  indentation:
+    spaces: 2
+    indent-sequences: whatever   # k8s and Ansible indent lists differently
+  truthy:
+    check-keys: false         # GitHub Actions uses 'on:' as a key
+  comments:
+    min-spaces-from-content: 1
+  new-lines: disable          # .gitattributes forces LF in git; Windows checkout shows CRLF

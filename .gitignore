@@ -16,3 +16,4 @@ vault_pass.txt
 # Editor / OS
 .vscode/
 .DS_Store
+.ansible/

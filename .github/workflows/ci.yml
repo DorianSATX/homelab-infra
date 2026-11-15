@@ -17,18 +17,24 @@ jobs:
       - uses: hashicorp/setup-terraform@v3
       - run: terraform fmt -check -recursive
       - run: terraform init -backend=false
+      # main.tf reads ~/.ssh/id_ed25519.pub; the runner has none, so make a throwaway one
+      - run: mkdir -p ~/.ssh && ssh-keygen -q -t ed25519 -N "" -f ~/.ssh/id_ed25519
       - run: terraform validate
 
   ansible-lint:
     name: Ansible lint
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ansible   # so ansible.cfg and roles/ are found
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - run: pip install ansible-lint
-      - run: ansible-lint ansible/playbooks/site.yml
+      - run: ansible-galaxy collection install -r requirements.yml
+      - run: ansible-lint playbooks/site.yml
 
   yamllint:
     name: yamllint
