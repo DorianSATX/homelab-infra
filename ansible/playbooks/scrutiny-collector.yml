@@ -1,18 +1,29 @@
-- hosts: proxmox_host
+- hosts: proxmox_host:pbs:nvr
+  become: true
   vars:
     scrutiny_version: v0.10.0
   tasks:
-    - name: Install dir
+    - name: Install and config dirs
       ansible.builtin.file:
-        path: /opt/scrutiny/bin
+        path: "{{ item }}"
         state: directory
         mode: "0755"
+      loop:
+        - /opt/scrutiny/bin
+        - /opt/scrutiny/config
 
     - name: Collector binary
       ansible.builtin.get_url:
         url: "https://github.com/AnalogJ/scrutiny/releases/download/{{ scrutiny_version }}/scrutiny-collector-metrics-linux-amd64"
         dest: /opt/scrutiny/bin/scrutiny-collector-metrics
         mode: "0755"
+
+    - name: Collector config (only hosts with device overrides)
+      ansible.builtin.copy:
+        dest: /opt/scrutiny/config/collector.yaml
+        mode: "0644"
+        content: "{{ {'version': 1, 'devices': scrutiny_device_overrides} | to_nice_yaml }}"
+      when: scrutiny_device_overrides is defined
 
     - name: Service unit (one run)
       ansible.builtin.copy:
