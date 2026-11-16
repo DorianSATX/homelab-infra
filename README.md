@@ -1,58 +1,131 @@
 # homelab-infra
 
-Infrastructure-as-code for my Proxmox homelab (`host1`, 192.0.2.1).
+[![CI](https://github.com/DorianSATX/homelab-infra/actions/workflows/ci.yml/badge.svg)](https://github.com/DorianSATX/homelab-infra/actions/workflows/ci.yml)
 
-## Layout
+Infrastructure-as-code for my home lab: a 3-node Proxmox cluster, a k3s cluster on top of it,
+segmented VLANs, and ~30 self-hosted services — built, documented, and (increasingly) automated
+from this repo.
 
-- `terraform/proxmox/` — provisions new LXCs/VMs on Proxmox via the `bpg/proxmox` provider.
-- `terraform/cloud/` — future home for Azure/AWS resources.
-- `ansible/` — configuration management for hosts once Terraform has created them.
-- `k3s/manifests/` — Kubernetes manifests, once services start moving into k3s.
+> Hostnames, domains and IPs in this repo are placeholders (`example.lan`, `192.0.2.x`).
+> Real values live in a private repo.
+
+---
+
+## The stack
+
+```
+                         Internet
+                            │
+                     ISP modem (double NAT)
+                            │
+                ┌───────────┴───────────┐
+                │  Ubiquiti EdgeRouter X │  routing · DHCP · inter-VLAN firewall
+                └───────────┬───────────┘
+                            │  802.1Q trunk
+      ┌──────────┬──────────┼──────────┬──────────┬──────────┐
+      ▼          ▼          ▼          ▼          ▼          ▼
+   Mgmt /     Trusted     IoT       Cameras    Storage    Media / Guest
+   Servers    clients                (NVR)
+      │
+      │   ┌──────────────── Remote access ────────────────┐
+      │   │  Tailscale subnet router + exit node (LXC)    │
+      │   │  split DNS → AdGuard, so names work off-LAN    │
+      │   └────────────────────────────────────────────────┘
+      │
+      ▼
+  AdGuard Home  ── *.example.lan ──▶  Nginx Proxy Manager
+  (DNS + ad-block)                     wildcard TLS · LAN-only ACL
+                                       · HTTP/2 · forced HTTPS
+                                              │
+                                              ▼
+  ┌────────────────────── Proxmox VE cluster "homelab" ──────────────────────┐
+  │                                                                          │
+  │   host1                      pve2                      pve3              │
+  │   (main node, LVM-thin)      (HP Elite Mini, ZFS)      (ZFS)             │
+  │        │                         │                        │              │
+  │        └──────────── corosync / knet, quorum 2 of 3 ──────┘              │
+  │                                                                          │
+  │   ~30 LXCs / VMs                    k3s cluster (3 VMs)                  │
+  │   • AdGuard · NPM · Vaultwarden     • kube-vip (API + LB VIPs)           │
+  │   • Netbox · Paperless-ngx/-gpt     • Traefik ingress                    │
+  │   • Home Assistant · Frigate NVR    • Dynacat dashboard                  │
+  │   • Zabbix · Grafana · Prometheus   • ntfy · Uptime Kuma · Scrutiny      │
+  │   • Smokeping · changedetection                                          │
+  │   • llama.cpp · Homelable map                                            │
+  └──────────────────────────────────┬───────────────────────────────────────┘
+                                     │  nightly vzdump
+                                     ▼
+                         Proxmox Backup Server (pbs1)
+```
+
+## What's in here
+
+```
+homelab-infra
+├── terraform/proxmox/     new LXC/VM shells via the bpg/proxmox provider
+├── ansible/
+│   ├── inventory/         cluster nodes, PBS, NVR, LXCs
+│   └── playbooks/
+│       ├── site.yml              baseline config (common role)
+│       ├── set-ips.yml           DHCP → static IP migration, safely
+│       ├── npm-hosts.yml         create reverse-proxy hosts via the NPM API
+│       ├── k3s-join.yml          join nodes to k3s
+│       └── scrutiny-collector.yml  SMART disk-health collectors
+├── k3s/manifests/         kube-vip, ntfy, Uptime Kuma, Scrutiny
+├── configs/smokeping/     latency probes + ntfy alert hook
+├── docs/                  cluster runbook, Frigate, Paperless, Klipper/prind
+└── .github/workflows/     CI: terraform validate · ansible-lint · yamllint
+```
+
+## Highlights
+
+**Static IPs without the pain — `set-ips.yml`**
+Moves guests off DHCP one at a time: asserts the hostname matches, pre-flights the new IP
+(cluster config grep + ping + ARP) so nothing collides, rewrites `net0` with `pct set`,
+reboots, waits for ping, then repoints the matching Nginx Proxy Manager host at the new address.
+
+**Reverse proxy as code — `npm-hosts.yml`**
+Creates proxy hosts through the NPM API with the wildcard cert, "LAN only" access list,
+websockets, HTTP/2, forced SSL and exploit blocking — then curls every host and fails on 5xx.
+
+**Monitoring that actually pings me**
+Smokeping watches every VLAN gateway, the ISP path and DNS resolution; alerts go to a
+self-hosted ntfy topic on my phone. Uptime Kuma and Scrutiny cover service and disk health.
+
+**Cluster runbook — [`docs/cluster.md`](docs/cluster.md)**
+How the 3-node cluster was built, the Intel I219-LM NIC hang fix + watchdog, quorum
+behavior, and the gotchas I hit so I don't have to rediscover them.
 
 ## Philosophy
 
-Terraform provisions (creates the LXC/VM shell), Ansible configures (installs and manages what runs
-inside it). Existing hand-built services are **not** being retroactively imported into Terraform —
-this repo only manages things created through it from now on. Old services get pulled in gradually,
-one at a time, as they're rebuilt or migrated.
+- **Terraform provisions, Ansible configures.** Terraform creates the shell; Ansible owns what
+  runs inside it.
+- **No big-bang imports.** Hand-built services move under management one at a time as they're
+  rebuilt — see [ROADMAP.md](ROADMAP.md).
+- **Nothing exposed to the internet.** Every web UI is LAN/Tailscale only behind NPM's access
+  list. Remote access is Tailscale, not port forwards.
+- **No secrets in git.** `terraform.tfvars`, state, vault files and tokens are gitignored;
+  credentials come from environment variables.
 
-## Getting started
+## Running it
 
 ```bash
 # Terraform
 cd terraform/proxmox
-cp terraform.tfvars.example terraform.tfvars   # fill in your real API token — this file is gitignored
-terraform init
-terraform plan
+cp terraform.tfvars.example terraform.tfvars   # add your Proxmox API token (gitignored)
+terraform init && terraform plan
 
 # Ansible
 cd ../../ansible
-ansible-inventory -i inventory/hosts.yml --list   # sanity check the inventory
+ansible-inventory -i inventory/hosts.yml --list            # sanity-check inventory
 ansible-playbook -i inventory/hosts.yml playbooks/site.yml --check   # dry run
 ```
 
-## Secrets
+## Roadmap
 
-Nothing that looks like a credential belongs in this repo. `terraform.tfvars`, `*.tfstate`, and any
-Ansible Vault files are gitignored. Generate a Proxmox API token scoped to what Terraform needs
-(Datacenter → Permissions → API Tokens) rather than using the root password.
+Shared storage + replication so HA failover is real, centralized logging (Loki), and more
+hand-built LXCs converted into Ansible roles. Details in [ROADMAP.md](ROADMAP.md).
 
-## Architecture
+## License
 
-```mermaid
-flowchart LR
-    subgraph Repo[homelab-infra]
-        TF[terraform/proxmox]
-        ANS[ansible/]
-        K3S[k3s/manifests]
-    end
-
-    TF -- "provisions LXC/VM shells" --> PVE[(Proxmox HA cluster)]
-    ANS -- "configures OS + installs services" --> PVE
-    K3S -. "future: workloads move here" .-> PVE
-```
-
-Terraform creates the container or VM shell on the cluster; Ansible then configures what runs
-inside it (packages, users, service config). k3s is the eventual home for services currently
-running as standalone LXCs/Docker containers, migrated over one at a time rather than all at once.
-See [ROADMAP.md](ROADMAP.md) for where this is headed.
+[MIT](LICENSE)
