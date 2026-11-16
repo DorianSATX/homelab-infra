@@ -17,3 +17,6 @@ vault_pass.txt
 .vscode/
 .DS_Store
 .ansible/
+
+Claude outputs/
+Homelab Handoff*.md
