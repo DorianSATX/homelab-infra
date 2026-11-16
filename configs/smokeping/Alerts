@@ -1,0 +1,26 @@
+*** Alerts ***
+
+# Alerts are piped to /usr/local/bin/smokeping-ntfy, which posts to ntfy topic "smokeping".
+to = |/usr/local/bin/smokeping-ntfy
+from = smokeping@example.lan
+
+# Patterns are checked against the last few 5-minute rounds, oldest first.
+# edgetrigger = yes: one message when it starts, one when it clears (not every 5 minutes).
+
++hostdown
+type = loss
+pattern = ==0%,==0%,==0%,==100%,==100%,==100%
+comment = stopped answering (100% loss for 15 min)
+edgetrigger = yes
+
++bigloss
+type = loss
+pattern = ==0%,==0%,==0%,>10%,>10%,>10%
+comment = sudden packet loss over 10% for 15 min
+edgetrigger = yes
+
++rttbad
+type = rtt
+pattern = <60,<60,<60,>100,>100,>100
+comment = latency jumped above 100 ms for 15 min
+edgetrigger = yes

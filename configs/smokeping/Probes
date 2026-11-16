@@ -1,0 +1,9 @@
+*** Probes ***
+
++ FPing
+binary = /usr/bin/fping
+
+# Times a real DNS query (dig) instead of a ping. Needs: apt install dnsutils
++ DNS
+binary = /usr/bin/dig
+lookup = google.com

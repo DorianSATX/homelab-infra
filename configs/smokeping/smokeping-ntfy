@@ -1,0 +1,24 @@
+#!/bin/sh
+# Smokeping alert -> ntfy.  Install: /usr/local/bin/smokeping-ntfy (chmod 755)
+# Smokeping calls it with: <alert> <target> <loss-pattern> <rtt-pattern> <hostname> [<1=raised|0=cleared>]
+# The ntfy token is NOT in this file (repo is public): it's read from /etc/smokeping/ntfy-token.
+
+TOKEN=$(cat /etc/smokeping/ntfy-token)
+ALERT="$1"; TARGET="$2"; LOSS="$3"; RTT="$4"; HOST="$5"; RAISE="${6:-1}"
+
+if [ "$RAISE" = "0" ]; then
+  STATE="cleared"; TAGS="white_check_mark"; PRIO="default"
+else
+  STATE="ALERT"; TAGS="warning"; PRIO="high"
+fi
+
+curl -s -o /dev/null \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Title: Smokeping $STATE: $TARGET" \
+  -H "Tags: $TAGS" \
+  -H "Priority: $PRIO" \
+  -H "Click: https://smokeping.example.lan/smokeping/" \
+  -d "$ALERT on $HOST ($TARGET)
+loss: $LOSS
+rtt:  $RTT" \
+  https://ntfy.example.lan/smokeping
