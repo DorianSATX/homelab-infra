@@ -1,0 +1,87 @@
+---
+# Move ONE container to its static IP. Included from set-ips.yml with loop_var `g`.
+# Read-only steps use check_mode: false so a --check dry run still inspects everything.
+
+- name: "{{ g.name }} | read CT {{ g.ctid }} config"
+  ansible.builtin.command: pct config {{ g.ctid }}
+  register: cfg
+  changed_when: false
+  check_mode: false
+
+- name: "{{ g.name }} | parse hostname and net0"
+  ansible.builtin.set_fact:
+    ct_hostname: "{{ cfg.stdout | regex_findall('^hostname: (.+)$', multiline=True) | first }}"
+    net0_old: "{{ cfg.stdout | regex_findall('^net0: (.+)$', multiline=True) | first }}"
+
+- name: "{{ g.name }} | safety check: CT {{ g.ctid }} is really {{ g.name }}"
+  ansible.builtin.assert:
+    that: ct_hostname == g.name
+    fail_msg: "CT {{ g.ctid }} is '{{ ct_hostname }}', not '{{ g.name }}'. Fix ips.yml before going on."
+    quiet: true
+
+- name: "{{ g.name }} | build the new net0 line (only ip= and gw= change)"
+  ansible.builtin.set_fact:
+    already_done: "{{ ('ip=' ~ g.ip ~ '/' ~ prefix) in net0_old }}"
+    net0_new: >-
+      {{ (net0_old
+          | regex_replace(',?gw=[^,]+', '')
+          | regex_replace('ip=[^,]+', 'ip=' ~ g.ip ~ '/' ~ prefix))
+         ~ ',gw=' ~ gateway }}
+
+- name: "{{ g.name }} | show the change"
+  ansible.builtin.debug:
+    msg:
+      - "old: {{ net0_old }}"
+      - "new: {{ net0_new if not already_done else '(already on ' ~ g.ip ~ ', nothing to do)' }}"
+
+- name: "{{ g.name }} | preflight: is {{ g.ip }} configured on any other guest in the cluster?"
+  ansible.builtin.shell: >
+    grep -rlE 'ip={{ g.ip | regex_escape }}/' /etc/pve/nodes/ | grep -v '/{{ g.ctid }}\.conf$' || true
+  register: claimed
+  changed_when: false
+  check_mode: false
+  when: not already_done
+
+- name: "{{ g.name }} | preflight: is anything live on {{ g.ip }}? (ping, then ARP table)"
+  ansible.builtin.shell: >
+    ping -c 2 -W 1 {{ g.ip }} >/dev/null 2>&1;
+    ip neigh show {{ g.ip }} | grep -q lladdr && echo taken || echo free
+  register: live
+  changed_when: false
+  check_mode: false
+  when: not already_done
+
+- name: "{{ g.name }} | preflight must pass"
+  ansible.builtin.assert:
+    that:
+      - claimed.stdout | length == 0
+      - live.stdout == 'free'
+    fail_msg: >-
+      {{ g.ip }} is not free --
+      configs: {{ claimed.stdout | default('') | replace('\n', ' ') or 'none' }},
+      network: {{ live.stdout | default('?') }}. Pick another IP in ips.yml.
+    quiet: true
+  when: not already_done
+
+- name: "{{ g.name }} | is the CT running?"
+  ansible.builtin.command: pct status {{ g.ctid }}
+  register: st
+  changed_when: false
+  check_mode: false
+
+- name: "{{ g.name }} | set static IP {{ g.ip }}"
+  ansible.builtin.command: pct set {{ g.ctid }} --net0 {{ net0_new }}
+  when: not already_done
+
+- name: "{{ g.name }} | reboot CT so it drops the old DHCP lease"
+  ansible.builtin.command: pct reboot {{ g.ctid }}
+  when: not already_done and 'running' in st.stdout
+
+- name: "{{ g.name }} | wait until it answers on {{ g.ip }}"
+  ansible.builtin.command: ping -c 1 -W 1 {{ g.ip }}
+  register: up
+  until: up.rc == 0
+  retries: 30
+  delay: 3
+  changed_when: false
+  when: not already_done and 'running' in st.stdout

@@ -1,0 +1,116 @@
+---
+# Path A: move LXCs off DHCP-pool addresses onto static IPs, then repoint NPM.
+# Plan lives in ../vars/ips.yml.
+#
+# Needs: an NPM user that can manage proxy hosts. Credentials come from env vars,
+# never from the repo:
+#   export NPM_USER='ansible@example.lan'
+#   read -rs NPM_PASS && export NPM_PASS        # type it; nothing echoes or lands in history
+#
+# Run from the ansible/ directory (WSL):
+#   ANSIBLE_HOST_KEY_CHECKING=False ansible-playbook -i inventory/hosts.yml \
+#     playbooks/set-ips.yml -e only=netbox --check        # dry run, one guest
+#   ...same without --check                               # do it
+#   -e only=netbox,watchyourlan                           # several
+#   (no -e only)                                          # every enabled line in ips.yml
+
+- name: Move LXCs to static IPs
+  hosts: proxmox_host
+  gather_facts: false
+  vars_files:
+    - ../vars/ips.yml
+  vars:
+    gateway: 192.0.2.1
+    prefix: 24
+    only_list: "{{ (only | default('')).split(',') | reject('equalto', '') | list }}"
+    todo: "{{ guests
+              | selectattr('node', 'equalto', inventory_hostname)
+              | selectattr('name', 'in', only_list if only_list | length > 0 else guests | map(attribute='name') | list)
+              | list }}"
+  tasks:
+    - name: Process each guest that lives on this node
+      ansible.builtin.include_tasks: tasks/set-ip-one.yml
+      loop: "{{ todo }}"
+      loop_control:
+        loop_var: g
+        label: "{{ g.name }} -> {{ g.ip }}"
+
+- name: Repoint NPM proxy hosts from old IPs to new IPs
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - ../vars/ips.yml
+  vars:
+    npm_api: https://proxy.example.lan/api
+    only_list: "{{ (only | default('')).split(',') | reject('equalto', '') | list }}"
+    todo: "{{ guests
+              | selectattr('name', 'in', only_list if only_list | length > 0 else guests | map(attribute='name') | list)
+              | list }}"
+  tasks:
+    - name: Make sure NPM credentials are in the environment
+      ansible.builtin.assert:
+        that:
+          - lookup('env', 'NPM_USER') | length > 0
+          - lookup('env', 'NPM_PASS') | length > 0
+        fail_msg: "export NPM_USER and NPM_PASS first (see top of this file)"
+        quiet: true
+
+    - name: Log in to the NPM API (get a token)
+      ansible.builtin.uri:
+        url: "{{ npm_api }}/tokens"
+        method: POST
+        body_format: json
+        body:
+          identity: "{{ lookup('env', 'NPM_USER') }}"
+          secret: "{{ lookup('env', 'NPM_PASS') }}"
+      register: npm_login
+      no_log: true
+      check_mode: false
+
+    - name: Fetch every proxy host
+      ansible.builtin.uri:
+        url: "{{ npm_api }}/nginx/proxy-hosts"
+        headers:
+          Authorization: "Bearer {{ npm_login.json.token }}"
+      register: npm_hosts
+      check_mode: false
+
+    - name: Match proxy hosts still aimed at a guest's old IP
+      ansible.builtin.set_fact:
+        npm_moves: >-
+          {%- set out = [] -%}
+          {%- for g in todo -%}
+          {%- for h in npm_hosts.json if h.forward_host == g.old_ip -%}
+          {%- set _ = out.append({'id': h.id, 'domain': h.domain_names[0], 'name': g.name, 'old': g.old_ip, 'new': g.ip}) -%}
+          {%- endfor -%}
+          {%- endfor -%}
+          {{ out }}
+
+    - name: Planned NPM changes
+      ansible.builtin.debug:
+        msg: "{{ npm_moves | map('to_json') | list if npm_moves | length > 0 else 'nothing in NPM points at the old IPs' }}"
+
+    - name: Repoint each match (port, SSL and options stay as they are)
+      ansible.builtin.uri:
+        url: "{{ npm_api }}/nginx/proxy-hosts/{{ item.id }}"
+        method: PUT
+        headers:
+          Authorization: "Bearer {{ npm_login.json.token }}"
+        body_format: json
+        body:
+          forward_host: "{{ item.new }}"
+      loop: "{{ npm_moves }}"
+      loop_control:
+        label: "{{ item.domain }}: {{ item.old }} -> {{ item.new }}"
+      changed_when: true
+
+    - name: Check each repointed site answers through NPM
+      ansible.builtin.uri:
+        url: "https://{{ item.domain }}"
+        follow_redirects: none
+        status_code: [200, 301, 302, 303, 307, 308, 401, 403]
+      loop: "{{ npm_moves }}"
+      loop_control:
+        label: "https://{{ item.domain }}"
+      when: not ansible_check_mode
