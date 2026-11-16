@@ -1,0 +1,159 @@
+---
+# Create missing NPM proxy hosts from ../vars/proxy-hosts.yml, with the *.example.lan wildcard cert.
+# Only creates. Never edits or deletes an existing proxy host.
+#
+# Run from the ansible/ directory (WSL), same credentials as set-ips.yml:
+#   export NPM_USER='ansible@example.lan'
+#   read -rs NPM_PASS && export NPM_PASS
+#   ansible-playbook playbooks/npm-hosts.yml --check     # dry run: shows what it would create
+#   ansible-playbook playbooks/npm-hosts.yml             # do it
+
+- name: Create missing NPM proxy hosts
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - ../vars/proxy-hosts.yml
+  vars:
+    npm_api: https://proxy.example.lan/api
+    wildcard: "*.example.lan"
+    # Name of the NPM access list to attach (Hosts > Access Lists), matched case-insensitively.
+    # Override per run with -e acl_name="Something else"; set a host's `acl: public` to skip it.
+    acl_name: "LAN only"
+  tasks:
+    - name: Make sure NPM credentials are in the environment
+      ansible.builtin.assert:
+        that:
+          - lookup('env', 'NPM_USER') | length > 0
+          - lookup('env', 'NPM_PASS') | length > 0
+        fail_msg: "export NPM_USER and NPM_PASS first (see top of this file)"
+        quiet: true
+
+    - name: Log in to the NPM API (get a token)
+      ansible.builtin.uri:
+        url: "{{ npm_api }}/tokens"
+        method: POST
+        body_format: json
+        body:
+          identity: "{{ lookup('env', 'NPM_USER') }}"
+          secret: "{{ lookup('env', 'NPM_PASS') }}"
+      register: npm_login
+      no_log: true
+      check_mode: false
+
+    - name: Fetch certificates
+      ansible.builtin.uri:
+        url: "{{ npm_api }}/nginx/certificates"
+        headers:
+          Authorization: "Bearer {{ npm_login.json.token }}"
+      register: npm_certs
+      check_mode: false
+
+    - name: Fetch access lists
+      ansible.builtin.uri:
+        url: "{{ npm_api }}/nginx/access-lists"
+        headers:
+          Authorization: "Bearer {{ npm_login.json.token }}"
+      register: npm_acls
+      check_mode: false
+
+    - name: Make sure the access list exists
+      ansible.builtin.assert:
+        that: npm_acls.json | selectattr('name', 'match', '(?i)^' ~ acl_name ~ '$') | list | length == 1
+        fail_msg: >-
+          No access list named '{{ acl_name }}'. Available: {{ npm_acls.json | map(attribute='name') | list }}.
+          Re-run with -e acl_name="<one of those>".
+        quiet: true
+
+    - name: Look up its id
+      ansible.builtin.set_fact:
+        acl_id: "{{ (npm_acls.json | selectattr('name', 'match', '(?i)^' ~ acl_name ~ '$') | first).id }}"
+
+    - name: Fetch existing proxy hosts
+      ansible.builtin.uri:
+        url: "{{ npm_api }}/nginx/proxy-hosts"
+        headers:
+          Authorization: "Bearer {{ npm_login.json.token }}"
+      register: npm_existing
+      check_mode: false
+
+    - name: Find the wildcard cert and work out which hosts are missing
+      ansible.builtin.set_fact:
+        cert_id: "{{ (npm_certs.json | selectattr('domain_names', 'contains', wildcard) | first).id }}"
+        existing_domains: "{{ npm_existing.json | map(attribute='domain_names') | flatten | map('lower') | list }}"
+
+    - name: Build the to-create list
+      ansible.builtin.set_fact:
+        missing: "{{ npm_hosts | rejectattr('domain', 'in', existing_domains) | list }}"
+
+    - name: Check each missing service answers on its port before creating it
+      ansible.builtin.wait_for:
+        host: "{{ item.forward_host }}"
+        port: "{{ item.forward_port }}"
+        timeout: 3
+      loop: "{{ missing }}"
+      loop_control:
+        label: "{{ item.domain }} -> {{ item.forward_host }}:{{ item.forward_port }}"
+      register: port_check
+      ignore_errors: true   # unreachable ones are reported and skipped, not fatal
+      check_mode: false
+
+    - name: Split into reachable and unreachable
+      ansible.builtin.set_fact:
+        unreachable: "{{ port_check.results | selectattr('failed', 'defined') | selectattr('failed') | map(attribute='item.domain') | list }}"
+
+    - name: Keep only the reachable ones
+      ansible.builtin.set_fact:
+        to_create: "{{ missing | rejectattr('domain', 'in', unreachable) | list }}"
+
+    - name: Plan
+      ansible.builtin.debug:
+        msg:
+          - "wildcard cert id: {{ cert_id }}"
+          - "access list: {{ acl_name }} (id {{ acl_id }})"
+          - "already in NPM, left alone: {{ npm_hosts | map(attribute='domain') | select('in', existing_domains) | list }}"
+          - "will create: {{ to_create | map(attribute='domain') | list }}"
+          - "skipped, nothing answering on the port: {{ unreachable }}"
+
+    - name: Create proxy host
+      ansible.builtin.uri:
+        url: "{{ npm_api }}/nginx/proxy-hosts"
+        method: POST
+        status_code: [200, 201]
+        headers:
+          Authorization: "Bearer {{ npm_login.json.token }}"
+        body_format: json
+        body:
+          domain_names: ["{{ item.domain }}"]
+          forward_scheme: "{{ item.scheme | default('http') }}"
+          forward_host: "{{ item.forward_host }}"
+          forward_port: "{{ item.forward_port | int }}"
+          certificate_id: "{{ cert_id | int }}"
+          ssl_forced: true
+          http2_support: true
+          block_exploits: true
+          allow_websocket_upgrade: "{{ item.websockets | default(true) }}"
+          caching_enabled: false
+          hsts_enabled: false
+          access_list_id: "{{ 0 if (item.acl | default('')) == 'public' else (acl_id | int) }}"
+          advanced_config: ""
+          locations: []
+          meta:
+            letsencrypt_agree: false
+            dns_challenge: false
+      loop: "{{ to_create }}"
+      loop_control:
+        label: "{{ item.domain }}"
+      changed_when: true
+
+    # Any answer below 500 means NPM reached the app (e.g. llama.cpp answers a bare GET with 415).
+    # Only 5xx (NPM couldn't reach the backend) or a timeout counts as broken.
+    - name: Check each new site answers through NPM
+      ansible.builtin.uri:
+        url: "https://{{ item.domain }}"
+        follow_redirects: none
+        status_code: "{{ range(100, 500) | list }}"
+      loop: "{{ to_create }}"
+      loop_control:
+        label: "https://{{ item.domain }}"
+      when: not ansible_check_mode
